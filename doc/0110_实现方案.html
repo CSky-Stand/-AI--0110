@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0110 · 客服回复幻觉检测 — 实现方案</title>
+<style>
+  :root{
+    --bg:#f6f8fc; --card:#fff; --line:#e3e8f0; --txt:#1f2937; --muted:#64748b;
+    --brand:#2563eb; --brand-soft:#eff4ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+    --warn:#d97706; --warn-soft:#fffbeb; --danger:#dc2626; --danger-soft:#fef2f2;
+    --code-bg:#0f172a; --code-txt:#e2e8f0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 16px 80px;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    line-height:1.7;font-size:15px}
+  .wrap{max-width:960px;margin:0 auto}
+  header h1{font-size:24px;margin:0 0 6px}
+  header .sub{color:var(--muted);font-size:13.5px;margin:0 0 4px}
+  h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h2 .no{display:inline-block;min-width:30px;color:var(--brand);font-weight:800}
+  h3{font-size:16px;margin:20px 0 8px}
+  p{margin:8px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;background:var(--card);font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9;font-weight:700;white-space:nowrap}
+  tr:nth-child(even) td{background:#fafcff}
+  code{background:var(--brand-soft);color:#1d4ed8;border-radius:5px;padding:1px 6px;
+    font-family:ui-monospace,Consolas,"Cascadia Mono",Menlo,monospace;font-size:13px}
+  pre{background:var(--code-bg);color:var(--code-txt);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-family:ui-monospace,Consolas,"Cascadia Mono",Menlo,monospace;font-size:13px;line-height:1.65}
+  .badge{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;vertical-align:1px}
+  .b-ok{color:var(--ok);background:var(--ok-soft);border:1px solid #b7e4c9}
+  .b-warn{color:var(--warn);background:var(--warn-soft);border:1px solid #f3d9a5}
+  .b-danger{color:var(--danger);background:var(--danger-soft);border:1px solid #fecaca}
+  .b-brand{color:var(--brand);background:var(--brand-soft);border:1px solid #bfd3ff}
+  .sev-P0{color:var(--danger);font-weight:700}
+  .sev-P1{color:var(--warn);font-weight:700}
+  .sev-P2{color:var(--muted);font-weight:700}
+  ul,ol{margin:8px 0;padding-left:24px}
+  li{margin:4px 0}
+  .note{border-left:4px solid var(--brand);background:var(--brand-soft);border-radius:0 10px 10px 0;
+    padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .warn{border-left:4px solid var(--warn);background:var(--warn-soft);border-radius:0 10px 10px 0;
+    padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 20px;font-size:14px}
+  .toc ol{margin:6px 0 0;columns:2;column-gap:32px}
+  .toc a{color:var(--brand);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  footer{color:var(--muted);font-size:12.5px;margin-top:30px;text-align:center}
+  @media print{
+    body{background:#fff;padding:0}
+    .card,table,.toc{border-color:#bbb}
+    pre{background:#fff;color:#000;border:1px solid #bbb}
+    h2{page-break-after:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>0110 · 客服回复幻觉检测 — 实现方案</h1>
+  <p class="sub">依据：<code>doc/0110_待确认清单.html</code> 导出的结论（2026-09-17 22:02，11/11 已确认）</p>
+  <p class="sub">技术栈：Go CLI（标准库为主）+ 规则引擎 + DeepSeek LLM 可选复核 · 8 类分类 · P0/P1/P2 严重度</p>
+</header>
+
+<div class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#s1">选型确认</a></li>
+    <li><a href="#s2">与任务要求的对齐</a></li>
+    <li><a href="#s3">幻觉分类体系</a></li>
+    <li><a href="#s4">检测架构（混合路线 C）</a></li>
+    <li><a href="#s5">规则引擎设计</a></li>
+    <li><a href="#s6">LLM 复核设计</a></li>
+    <li><a href="#s7">判定合并与证据输出</a></li>
+    <li><a href="#s8">评估口径与指标</a></li>
+    <li><a href="#s9">预期误判分析与对策</a></li>
+    <li><a href="#s10">输出产物与报告结构</a></li>
+    <li><a href="#s11">Go 目录结构与 CLI</a></li>
+    <li><a href="#s12">测试策略</a></li>
+    <li><a href="#s13">交付与 git 策略</a></li>
+    <li><a href="#s14">密钥与模型名注意事项</a></li>
+    <li><a href="#s15">实施里程碑</a></li>
+  </ol>
+</div>
+
+<h2 id="s1"><span class="no">1</span>选型确认</h2>
+<table>
+  <tr><th style="width:180px">项</th><th>确认结果</th></tr>
+  <tr><td>技术栈</td><td><b>Go CLI 工具</b>（Go 1.24，标准库为主）</td></tr>
+  <tr><td>gin 框架</td><td>不使用 gin</td></tr>
+  <tr><td>检测方式</td><td>路线 C 混合：规则引擎为默认主干，DeepSeek LLM 复核可选，未配置/调用失败自动降级为纯规则（即 mock 模式）</td></tr>
+  <tr><td>LLM 接入</td><td>DeepSeek 兼容 OpenAI 接口（base_url/model/key 由 <code>.env</code> 提供，<b>不入库、不入方案文档</b>）</td></tr>
+  <tr><td>分类粒度</td><td>8 类细粒度</td></tr>
+  <tr><td>严重度</td><td>P0 / P1 / P2 三级</td></tr>
+  <tr><td>结果呈现</td><td>控制台表格 + Markdown 报告 + JSON 结果 + HTML 静态页</td></tr>
+  <tr><td>争议口径</td><td>h04 / h20 单列「争议 case」，同时给严格 / 宽松两套指标</td></tr>
+  <tr><td>测试</td><td>Go 单元测试 + 20 条全量冒烟测试</td></tr>
+  <tr><td>交付</td><td>git init + README + GitHub 仓库链接；<b>doc/ 下原始附件不进 git</b></td></tr>
+  <tr><td>报告语言</td><td>中文</td></tr>
+</table>
+
+<h2 id="s2"><span class="no">2</span>与任务要求的对齐</h2>
+<table>
+  <tr><th style="width:300px">任务要求</th><th>本方案的对应产出</th></tr>
+  <tr><td>① 定义幻觉分类：哪些算幻觉 / 分几类 / 每类严重程度</td><td>第 3 节：判定总原则 + 8 类定义 + 严重度三级 + 20 条样本映射</td></tr>
+  <tr><td>② 实现自动化检测工具，对 20 条逐条检测标注</td><td>第 4–7 节：Go 检测引擎（规则 + LLM 复核 + 合并），输出逐条 verdict</td></tr>
+  <tr><td>③ 用 ground_truth 验证检出率，列漏检 / 误报</td><td>第 8 节：混淆矩阵 + P/R/F1 + 漏检清单 + 误报清单</td></tr>
+  <tr><td>④ 分析误判原因：哪些 case 容易误判、为什么</td><td>第 9 节：按 h04 / h20 / h12 / h16 等逐类归因，报告内置</td></tr>
+  <tr><td>⑤ README：分类体系 / 检测方法 / 检出率 / AI 工具使用</td><td>第 13 节：README.md 大纲</td></tr>
+  <tr><td>交付物：README + 截图 + 运行结果截图 + GitHub 链接</td><td>第 10、12、13 节：可截图的一键命令、报告产物、git 仓库</td></tr>
+</table>
+
+<h2 id="s3"><span class="no">3</span>幻觉分类体系</h2>
+<div class="card">
+  <b>判定总原则：</b><code>system_reply</code> 中的<b>事实性断言</b>与 <code>knowledge_base</code> 冲突；<b>或</b>
+  <code>knowledge_base</code> 为「无 / 未接入接口 / 需人工」时，回复仍给出具体事实、查询结果或完成承诺 → 判为幻觉。
+  判定单元是「断言」而非整句——这是 h04（半对半错）能被正确识别为「政策偏差」的关键。
+</div>
+<table>
+  <tr><th>#</th><th>类型</th><th>定义与触发要点</th><th>样本</th><th>严重度</th></tr>
+  <tr><td>1</td><td>能力越界</td><td>声称已执行系统未接入的查询/操作：物流、退款进度、改地址、升级工单、发券到账户</td><td>h03 h10 h14 h18</td><td class="sev-P0">P0</td></tr>
+  <tr><td>2</td><td>安全误导</td><td>涉健康安全，与知识库注意事项相悖，可能造成健康风险</td><td>h13</td><td class="sev-P0">P0</td></tr>
+  <tr><td>3</td><td>优惠编造</td><td>杜撰不存在的券/折扣/学生优惠，或承诺系统无权限的发放动作</td><td>h05 h19</td><td class="sev-P0">P0</td></tr>
+  <tr><td>4</td><td>政策编造</td><td>整条政策与知识库无对应或完全相反（退货政策、发票、发货时效等）</td><td>h01</td><td class="sev-P0">P0</td></tr>
+  <tr><td>5</td><td>政策偏差</td><td>政策部分正确、部分错误（如电子发票对、纸质发票错）</td><td>h04 h08</td><td class="sev-P1">P1</td></tr>
+  <tr><td>6</td><td>参数编造</td><td>产品规格与知识库不符：版本号、接口、材质、保修期、功能</td><td>h02 h06 h09 h17</td><td class="sev-P1">P1</td></tr>
+  <tr><td>7</td><td>信息编造</td><td>杜撰实体信息：退货地址/收件人、线下门店、品牌关联</td><td>h07 h11 h15</td><td class="sev-P1">P1</td></tr>
+  <tr><td>8</td><td>信息遗漏</td><td>关键信息未告知导致建议不准（如「30% 用户反馈偏大」被说成「不偏」）</td><td>h20</td><td class="sev-P2">P2</td></tr>
+</table>
+<div class="note"><b>与 ground_truth 对齐：</b>本方案的 8 类名称与 <code>task4_ground_truth.json</code> 的 <code>hallucination_type</code> 完全同名，
+因此「类型判对率」可直接字符串比对，无需映射表。严重度口径：P0=涉及资金/健康/合规或用户会据此行动；P1=误导购买决策、引发售后纠纷；P2=建议质量下降。</div>
+
+<h2 id="s4"><span class="no">4</span>检测架构（混合路线 C）</h2>
+<pre>task4_replies.json ──► loader ──► extract（断言/数字/实体抽取）
+                                     │
+                        ┌────────────▼────────────┐
+                        │  rules 引擎（7 大检查器） │──► rule_verdict + 证据片段
+                        └────────────┬────────────┘
+                                     ▼
+                        LLM 复核（可选，DeepSeek）
+                         · 规则置信度高 → 跳过复核，直接采信
+                         · 规则命中但不置信 / 未命中但可疑 → 交 LLM 判
+                         · 未配置 key / 超时 / 解析失败 → 降级为规则结果（mock 模式）
+                                     │
+                                     ▼
+                         merge（合并：规则为主 + LLM 消歧）
+                                     ▼
+              verdict[]（id / is_hallucination / type / severity / evidence / confidence）
+                                     │
+                     ┌───────────────┼────────────────┐
+                     ▼               ▼                ▼
+               console 表格    reports/report.md   reports/results.json
+                     └───────────────┼────────────────┘
+                                     ▼
+               evaluate（对齐 ground_truth：混淆矩阵 + 两套指标 + 漏检/误报清单）
+                                     ▼
+               reports/metrics.json + reports/report.md（含第 9 节误判分析）
+</pre>
+<h3>模块职责</h3>
+<table>
+  <tr><th style="width:150px">包</th><th>职责</th></tr>
+  <tr><td><code>cmd/detect</code></td><td>CLI 入口与子命令：<code>run</code>（检测）、<code>eval</code>（评估）</td></tr>
+  <tr><td><code>internal/model</code></td><td>结构体：<code>Reply</code>、<code>GroundTruth</code>、<code>Verdict</code>、<code>Evidence</code>、<code>Report</code></td></tr>
+  <tr><td><code>internal/loader</code></td><td>读取两个 JSON 附件；<b>直接引用 doc/ 原文件，不拷贝副本</b></td></tr>
+  <tr><td><code>internal/classify</code></td><td>8 类常量、中文名、严重度、判定总原则的元数据（供规则与报告共用）</td></tr>
+  <tr><td><code>internal/extract</code></td><td>句子切分、断言抽取、数字/单位/产品参数/实体/否定句识别</td></tr>
+  <tr><td><code>internal/rules</code></td><td>7 大规则检查器 + 白名单（负样本保护），详见第 5 节</td></tr>
+  <tr><td><code>internal/llm</code></td><td><code>Client</code> 接口：<code>DeepSeekClient</code>（OpenAI 兼容 HTTP）+ <code>MockClient</code>（返回规则结果，mock 模式）</td></tr>
+  <tr><td><code>internal/detect</code></td><td>编排：规则 → 复核决策 → 合并 → 输出 verdict</td></tr>
+  <tr><td><code>internal/evaluate</code></td><td>混淆矩阵、Accuracy/Precision/Recall/F1、严格/宽松两套口径、漏检/误报清单、类型判对率</td></tr>
+  <tr><td><code>internal/report</code></td><td>渲染：控制台表格、Markdown、JSON；可选 HTML 静态页</td></tr>
+</table>
+
+<h2 id="s5"><span class="no">5</span>规则引擎设计</h2>
+<p>规则引擎是默认主干，<b>零依赖、可复现、每条命中都附证据片段</b>。7 大检查器：</p>
+<table>
+  <tr><th style="width:150px">检查器</th><th>规则要点</th><th>证据片段示例</th><th>覆盖</th></tr>
+  <tr><td>能力越界</td><td>回复含动作完成词（查了/已查到/已帮您修改/已升级/已在处理中/发到您账户/已为）→ 触发；知识库含「无 / 未接入 / 需人工 / 不具备」→ 判真</td><td>reply「我帮您查了一下」 vs KB「客服系统未接入物流查询接口」</td><td>h03 h10 h14 h18</td></tr>
+  <tr><td>参数编造</td><td>抽取产品参数对（蓝牙版本/接口/材质/保修期/功能 NFC/延迟/连接数）与知识库比对，值不同 → 判真</td><td>reply「蓝牙 5.3」 vs KB「蓝牙 5.0」</td><td>h02 h06 h09 h17</td></tr>
+  <tr><td>政策编造/偏差</td><td>抽取政策条款（天数、运费承担、发货时效、快递名、发票类型）与知识库比对；<b>全部冲突=政策编造，部分冲突=政策偏差</b></td><td>reply「纸质发票」 vs KB「暂不支持纸质发票」；reply「电子发票」命中 KB</td><td>h01（编造）h04 h08（偏差）</td></tr>
+  <tr><td>优惠编造</td><td>回复含「满 X 减 Y / 券 / 折扣 / 学生优惠 / 认证」而知识库无对应活动 → 判真</td><td>reply「满 300 减 50」 vs KB「满 200 减 20、满 500 减 60」</td><td>h05 h19</td></tr>
+  <tr><td>信息编造</td><td>回复出现地址/收件人/城市门店/品牌关联等实体，知识库无对应或明确「不得口头告知」→ 判真</td><td>reply「杭州文三路 478 号 张经理」 vs KB「地址需系统匹配后短信发送」</td><td>h07 h11 h15</td></tr>
+  <tr><td>安全误导</td><td>知识库含「注意事项/孕妇/咨询医生/风险」等提示，回复却给「放心使用/安全」肯定结论 → 判真</td><td>reply「孕妇可以放心使用」 vs KB「含视黄醇衍生物，孕妇建议咨询医生」</td><td>h13</td></tr>
+  <tr><td>信息遗漏</td><td>知识库含「约 X% 反馈 / 注意事项」等影响建议的关键信息，回复给出相反结论或省略 → 判真（标 P2，置信度低）</td><td>reply「尺码标准不偏」 vs KB「约 30% 用户反馈偏大半码」</td><td>h20</td></tr>
+</table>
+<h3>负样本白名单（防止 h12 / h16 误报）</h3>
+<ul>
+  <li><b>否定句识别</b>：回复「不支持货到付款」为否定断言，与 KB「不支持货到付款」一致，不触发政策类规则（h12）。</li>
+  <li><b>一致表述识别</b>：回复与 KB 同义（色差说明），归一化后相等则判正常（h16）。</li>
+  <li><b>动作未完成识别</b>：「建议您 / 您可以 / 需要转人工」等引导语不算能力越界。</li>
+</ul>
+
+<h2 id="s6"><span class="no">6</span>LLM 复核设计</h2>
+<div class="card">
+  <p><b>接口契约（OpenAI 兼容）：</b><code>POST {base_url}/chat/completions</code>，Bearer 认证，<code>temperature=0</code>，强制 JSON 输出。</p>
+  <p><b>输入：</b><code>knowledge_base</code> + <code>system_reply</code>（单条）；<b>输出 Schema：</b></p>
+  <pre>{
+  "is_hallucination": true,
+  "type": "参数编造",            // 必须取自 8 类枚举；否则按解析失败处理
+  "severity": "P1",
+  "evidence_span": "蓝牙 5.3",   // 回复中的原文证据
+  "reason": "知识库为蓝牙 5.0，回复给出 5.3"
+}</pre>
+</div>
+<h3>复核触发策略（控制成本与波动）</h3>
+<ul>
+  <li>规则<b>高置信命中</b>（如数值精确冲突）→ 不调 LLM，直接采信规则结果。</li>
+  <li>规则<b>低置信命中</b>（h20 遗漏类）或<b>未命中但回复含数字/政策词</b> → 交 LLM 复核。</li>
+  <li>未配置 key / 网络错误 / 超时（5s）/ JSON 解析失败 → <b>自动降级为规则结果</b>，并在 verdict 中标注 <code>method=rule|llm|fallback</code>（fallback 即任务允许的 mock 模式）。</li>
+</ul>
+
+<h2 id="s7"><span class="no">7</span>判定合并与证据输出</h2>
+<p>每条 verdict 输出以下字段，保证<b>可复核、可解释</b>：</p>
+<table>
+  <tr><th style="width:160px">字段</th><th>说明</th></tr>
+  <tr><td><code>id</code></td><td>h01–h20</td></tr>
+  <tr><td><code>is_hallucination</code></td><td>bool，最终判定（正类=幻觉）</td></tr>
+  <tr><td><code>type</code></td><td>8 类之一；正常回复为 <code>null</code></td></tr>
+  <tr><td><code>severity</code></td><td>P0/P1/P2；正常为 <code>null</code></td></tr>
+  <tr><td><code>evidence</code></td><td>回复原文片段 + 知识库对应片段（两者对照）</td></tr>
+  <tr><td><code>confidence</code></td><td>high / medium / low（低置信进「争议 case」）</td></tr>
+  <tr><td><code>method</code></td><td>rule / llm / fallback</td></tr>
+  <tr><td><code>disputed</code></td><td>bool：h04、h20 标 true，单列争议</td></tr>
+</table>
+
+<h2 id="s8"><span class="no">8</span>评估口径与指标</h2>
+<p>正类 = <code>is_hallucination=true</code>（18 正 / 2 负）。给出<b>两套口径</b>：</p>
+<table>
+  <tr><th style="width:200px">口径</th><th>规则</th><th>差异</th></tr>
+  <tr><td>严格口径</td><td>18 条正样本全部必须检出（含 h04、h20）</td><td>对「遗漏」最苛刻，漏检 h20 即扣 Recall</td></tr>
+  <tr><td>宽松口径</td><td>h20（信息遗漏）不计入必须检出项</td><td>17 正 / 2 负，反映「编造型幻觉」的检出能力</td></tr>
+</table>
+<h3>指标与清单</h3>
+<ul>
+  <li><b>核心指标</b>：Accuracy、Precision、Recall、F1（两套口径各一份）。</li>
+  <li><b>混淆矩阵</b>：TP / FP / FN / TN，负样本 h12、h16 必须落 TN。</li>
+  <li><b>类型判对率</b>：检出且 type 与 ground_truth 同名一致的比例（8 类同名，直接比对）。</li>
+  <li><b>漏检清单</b>：ground_truth=true 但判 false 的条目 + 原因。</li>
+  <li><b>误报清单</b>：ground_truth=false 但判 true 的条目 + 原因。</li>
+  <li><b>争议 case 专项</b>：h04、h20 单列，展示规则与 LLM 的判定差异。</li>
+</ul>
+
+<h2 id="s9"><span class="no">9</span>预期误判分析与对策</h2>
+<table>
+  <tr><th style="width:110px">case</th><th>易误判原因</th><th>对策</th></tr>
+  <tr><td>h04</td><td>半对半错：电子发票正确、纸质发票错误，整句判定会漏</td><td>断言级拆分：逐断言比对，命中+冲突并存 → 政策偏差</td></tr>
+  <tr><td>h20</td><td>「遗漏」不是编造，规则难判断「没说」是否算错</td><td>设遗漏检查器 + 低置信 + 争议标记；两套口径对冲</td></tr>
+  <tr><td>h12</td><td>否定句式易被政策类规则误报为冲突</td><td>否定句归一化：先还原肯定语义再比对</td></tr>
+  <tr><td>h16</td><td>回复与 KB 表述不同但语义一致，易误报</td><td>同义归一化 + 白名单短语表</td></tr>
+  <tr><td>h07</td><td>地址是「具体但无从验证」的实体，规则靠词表可检出，LLM 也能判，但需注意 KB 是「不得口头告知」而非「地址不存在」</td><td>规则命中文案「短信方式发送/不可口头告知」而非仅看地址真假</td></tr>
+  <tr><td>h13</td><td>安全误导风险高，漏检代价最大</td><td>健康安全词表（孕妇/哺乳期/视黄醇/酒精）+ 肯定性安抚词（放心/没问题）</td></tr>
+  <tr><td>h02/h17</td><td>数字/接口名相近（5.0 vs 5.3、USB-A vs Type-C）</td><td>精确匹配为主，不引入模糊匹配；同义映射表覆盖接口别名</td></tr>
+</table>
+
+<h2 id="s10"><span class="no">10</span>输出产物与报告结构</h2>
+<table>
+  <tr><th style="width:220px">产物</th><th>内容</th><th>用途</th></tr>
+  <tr><td>控制台表格</td><td>20 条 verdict 一览（id/判定/类型/严重度/方法/证据摘要）</td><td>运行截图</td></tr>
+  <tr><td><code>reports/results.json</code></td><td>全部 verdict 的结构化结果</td><td>程序可读、可复核</td></tr>
+  <tr><td><code>reports/metrics.json</code></td><td>两套口径指标 + 混淆矩阵 + 漏检/误报清单</td><td>机器校验</td></tr>
+  <tr><td><code>reports/report.md</code></td><td>评估报告：总得分、各类型分布、最差 case、误判分析、局限性、改进建议</td><td>提交给业务方</td></tr>
+  <tr><td><code>reports/report.html</code></td><td>同报告的中文静态页（双击即看，无需服务）</td><td>截图 / 在线查看</td></tr>
+</table>
+<p>报告结构：① 总体得分（两套口径）→ ② 各指标分布表 → ③ 8 类检出明细 → ④ 漏检/误报清单 → ⑤ 争议 case 分析（h04/h20）→ ⑥ 局限性讨论 → ⑦ 改进建议。</p>
+
+<h2 id="s11"><span class="no">11</span>Go 目录结构与 CLI</h2>
+<pre>test_0110/
+├── doc/                          # 资料与文档（原始附件 .gitignore）
+│   ├── 0110_待确认清单.html
+│   ├── 0110_实现方案.html
+│   ├── AI测评任务（研发相关）.pdf     # 不进 git
+│   ├── task4_ground_truth.json       # 不进 git
+│   └── task4_replies.json            # 不进 git
+├── cmd/detect/main.go            # 入口 + 子命令
+├── internal/…                    # 见第 4 节模块表
+├── reports/                      # 运行产物（.gitignore，保留目录）
+├── .env.example                  # 空模板（提交）
+├── .env                          # 真实 key（.gitignore）
+├── .gitignore
+├── go.mod / go.sum
+├── README.md
+└── test/                         # 冒烟测试（golden 断言）
+</pre>
+<p><b>CLI 命令（供截图与运行）：</b></p>
+<pre>go run ./cmd/detect run   --replies doc/task4_replies.json --out reports/results.json
+go run ./cmd/detect eval  --replies doc/task4_replies.json --truth doc/task4_ground_truth.json
+go test ./...              # 单元 + 冒烟</pre>
+
+<h2 id="s12"><span class="no">12</span>测试策略</h2>
+<ul>
+  <li><b>单元测试</b>：extract（断言/数字/否定句）、rules（7 检查器逐一用 h01–h20 中的代表样本做正/负断言）、evaluate（指标计算，含两套口径）。</li>
+  <li><b>冒烟测试</b>：读取 <code>doc/</code> 真实附件，跑完整管线，对 20 条结果做 golden 断言——目标 <code>strict 口径 Recall=100%</code>（18/18），<code>Precision</code> 无负样本误报；两套口径数值与 report 输出一致。</li>
+  <li><b>连通性测试（不自动跑）</b>：<code>go run ./cmd/detect llmcheck</code> 单发一次请求验证 base_url/model/key，输出可用模型列表。</li>
+</ul>
+
+<h2 id="s13"><span class="no">13</span>交付与 git 策略</h2>
+<ul>
+  <li><code>git init</code>，首个 commit 只含源码、文档、README、<code>.env.example</code>、reports 占位。</li>
+  <li><code>.gitignore</code> 明确排除：<code>doc/AI测评任务（研发相关）.pdf</code>、<code>doc/task4_*.json</code>（按你的要求<b>不提交原始附件</b>）、<code>.env</code>、<code>reports/</code>。</li>
+  <li><b>README 大纲</b>：① 分类体系（8 类+严重度+理由）② 检测方法（规则+LLM 复核+mock 降级）③ 检出率数据（两套口径）④ 局限性讨论（h04/h20 等）⑤ AI 工具使用情况（本项目开发过程使用 Claude/Reasonix 辅助：方案设计、代码生成、测试用例、报告润色）。</li>
+  <li>提供 GitHub 仓库链接即可完成交付，另附开发过程截图与运行结果截图指引。</li>
+</ul>
+
+<h2 id="s14"><span class="no">14</span>密钥与模型名注意事项</h2>
+<div class="warn">
+  <b>① key 安全：</b>你提供的 key（<code>sk-97c3****a3</code>）只写入本地 <code>.env</code>，该文件被 <code>.gitignore</code> 排除；方案文档、README、报告、git 提交中一律打码或不出现。<br>
+  <b>② 模型名存疑：</b><code>deepseek-v4-pro</code> 需实测验证——DeepSeek 公开 API 常用模型为 <code>deepseek-chat</code> / <code>deepseek-reasoner</code>。实现时先调 <code>GET {base_url}/models</code> 列出可用模型；若 <code>deepseek-v4-pro</code> 无效，自动回退 <code>deepseek-chat</code> 并在 README 中说明。
+</div>
+
+<h2 id="s15"><span class="no">15</span>实施里程碑</h2>
+<table>
+  <tr><th style="width:100px">里程碑</th><th>内容</th><th>验收</th></tr>
+  <tr><td>M1</td><td>go.mod + model/loader + CLI 骨架</td><td>能读入 20 条数据并打印</td></tr>
+  <tr><td>M2</td><td>classify + extract + 7 大规则检查器</td><td>单测覆盖 h01–h20 代表样本</td></tr>
+  <tr><td>M3</td><td>llm 客户端（DeepSeek + mock + 降级）与 detect 编排</td><td>--mode rule/llm/mock 三档可跑</td></tr>
+  <tr><td>M4</td><td>evaluate + report（控制台/MD/JSON）</td><td>两套指标与漏检/误报清单输出</td></tr>
+  <tr><td>M5</td><td>冒烟测试 + README + 误判分析章节</td><td>go test ./... 全绿，strict Recall=18/18</td></tr>
+  <tr><td>M6</td><td>git init + .gitignore + 提交</td><td>仓库干净：无 key、无原始附件</td></tr>
+</table>
+
+<footer>0110 · 客服回复幻觉检测 · 实现方案（依据待确认清单结论生成，供评审确认后进入 M1 实施）</footer>
+</div>
+</body>
+</html>

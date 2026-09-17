@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0110 · 客服回复幻觉检测 — 待确认清单</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#ffffff; --line:#e2e8f0; --txt:#1f2937; --muted:#6b7280;
+    --brand:#2563eb; --brand-soft:#eff4ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+    --warn:#d97706; --warn-soft:#fffbeb; --danger:#dc2626; --danger-soft:#fef2f2;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:28px 16px 72px; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    line-height:1.65; font-size:15px;
+  }
+  .wrap{max-width:900px;margin:0 auto}
+  header{margin-bottom:18px}
+  header h1{font-size:23px;margin:0 0 8px;letter-spacing:.2px}
+  header .sub{margin:0;color:var(--muted);font-size:13.5px}
+  .toolbar{
+    position:sticky; top:0; z-index:20; margin:16px 0 20px; padding:12px 14px;
+    background:rgba(255,255,255,.92); backdrop-filter:blur(6px);
+    border:1px solid var(--line); border-radius:12px;
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    box-shadow:0 2px 10px rgba(15,23,42,.05);
+  }
+  .progress{font-size:13.5px;color:var(--muted);margin-right:auto;font-variant-numeric:tabular-nums}
+  .progress b{color:var(--txt)}
+  .progress.done b{color:var(--ok)}
+  button{
+    font:inherit; font-size:13.5px; padding:8px 14px; border-radius:9px; cursor:pointer;
+    border:1px solid var(--line); background:#fff; color:var(--txt); transition:.15s;
+  }
+  button:hover{border-color:#c7d2e4; background:#f8fafc}
+  button.primary{background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600}
+  button.primary:hover{background:#1d4ed8}
+  button.ghost{color:var(--muted)}
+  .q{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px; margin-bottom:14px; transition:.15s;
+  }
+  .q.incomplete{border-color:#f6c9a8; background:#fffdfa}
+  .qhead{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
+  .qno{
+    font-size:12.5px; font-weight:700; color:#fff; background:#334155;
+    padding:2px 9px; border-radius:6px; letter-spacing:.5px;
+  }
+  .qhead h2{font-size:16px;margin:0}
+  .qdesc{margin:6px 0 12px;color:var(--muted);font-size:13.5px}
+  .opts{display:flex;flex-direction:column;gap:8px}
+  label.opt{
+    display:flex; gap:10px; align-items:flex-start; padding:10px 12px;
+    border:1px solid var(--line); border-radius:10px; cursor:pointer; transition:.12s;
+  }
+  label.opt:hover{background:#f8fafc}
+  label.opt.rec{border-left:3px solid var(--ok)}
+  label.opt.sel{background:var(--brand-soft); border-color:#bfd3ff}
+  label.opt.sel.rec{background:var(--ok-soft); border-color:#a7e3bd}
+  label.opt input{margin:3px 0 0; flex:0 0 auto; accent-color:var(--brand); width:16px; height:16px}
+  .opt-body{display:block;flex:1 1 auto}
+  .opt-text{display:block;font-weight:500}
+  .opt-desc{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+  .badge{
+    display:inline-block; margin-left:6px; font-size:11.5px; font-weight:700;
+    color:var(--ok); background:var(--ok-soft); border:1px solid #b7e4c9;
+    padding:1px 7px; border-radius:999px; vertical-align:1px;
+  }
+  .badge.must{color:var(--warn); background:var(--warn-soft); border-color:#f3d9a5}
+  .note{display:block;margin-top:12px}
+  .note span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+  textarea{
+    width:100%; font:inherit; font-size:13.5px; padding:9px 11px; resize:vertical;
+    border:1px solid var(--line); border-radius:9px; background:#fcfdff; color:var(--txt);
+  }
+  textarea:focus{outline:none;border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+  h2.sect{font-size:17px;margin:26px 0 10px}
+  .out{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:10px}
+  .outbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .hint{font-size:13px;color:var(--muted)}
+  .hint.ok{color:var(--ok)}
+  .hint.err{color:var(--danger)}
+  pre#result{
+    margin:0; padding:14px; min-height:110px; max-height:none; overflow:auto;
+    background:#0f172a; color:#e2e8f0; border-radius:10px;
+    font-family:ui-monospace,Consolas,"Cascadia Mono",Menlo,monospace; font-size:13px;
+    white-space:pre-wrap; word-break:break-word; line-height:1.7;
+  }
+  pre#result:empty::before{content:"（点「一键生成结论」后，结果会显示在这里）"; color:#64748b}
+  footer{color:var(--muted);font-size:12.5px;margin-top:22px;text-align:center}
+  @media print{
+    .toolbar,button,footer{display:none!important}
+    body{background:#fff;padding:0}
+    .q,.out{border-color:#bbb;break-inside:avoid}
+    pre#result{background:#fff;color:#000;border:1px solid #bbb}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>0110 · 客服回复幻觉检测 — 待确认清单</h1>
+    <p class="sub">
+      每题请选择一个选项（带 <span style="color:#16a34a;font-weight:700">★推荐</span> 的是我的建议），并在「我的补充」里写下你的想法。
+      全部确认后点 <b>一键生成结论</b> → <b>复制结论</b> → 粘贴回给 AI 继续完善方案。
+      填写内容会自动保存在本机浏览器，刷新不丢失。
+    </p>
+  </header>
+
+  <div class="toolbar">
+    <div class="progress" id="progress">已完成 <b>0</b> / 11</div>
+    <button id="btnAll">全部采用推荐项</button>
+    <button id="btnReset" class="ghost">重新填写</button>
+    <button id="btnGen" class="primary">一键生成结论</button>
+    <button id="btnCopy">复制结论</button>
+  </div>
+
+  <main id="questions"></main>
+
+  <h2 class="sect">其他补充 / 全局说明</h2>
+  <div class="out" style="padding:14px 18px">
+    <textarea id="globalNote" rows="3" placeholder="任何额外要求，例如：交付目录结构、命名规范、是否要输出中英对照、评分口径的额外说明……"></textarea>
+  </div>
+
+  <h2 class="sect">结论</h2>
+  <div class="out">
+    <div class="outbar">
+      <button id="btnGen2" class="primary">一键生成结论</button>
+      <button id="btnCopy2">复制结论</button>
+      <span class="hint" id="hint"></span>
+    </div>
+    <pre id="result"></pre>
+  </div>
+
+  <footer>0110 · 客服回复幻觉检测测评 · 待确认清单（离线可用，无需联网）</footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var QUESTIONS = [
+    {
+      id: "Q1",
+      title: "技术栈",
+      desc: "检测工具用什么语言 / 形态实现？（PDF 说明语言框架不限，当前工作区为空）",
+      options: [
+        { text: "Python CLI 工具", desc: "单包 + 命令行运行，输出 Markdown 报告与 JSON 结果，最省事、最贴合 evaluation 类任务", rec: true },
+        { text: "Go CLI 工具", desc: "工作区路径在 D:\\Desktop\\Go 下；若你主业是 Go，产物更贴合你的技术栈" },
+        { text: "Node / TypeScript CLI 工具", desc: "若你的交付环境偏 Node/前端生态" },
+        { text: "其他（请在补充里说明）", desc: "例如 Python 后端 + 静态网页报告、Jupyter Notebook 等", requiresNote: true }
+      ],
+      noteHint: "例如：希望产物能直接部署到 GitHub Pages / 希望你顺手把结果也导出成 CSV……"
+    },
+    {
+      id: "Q2",
+      title: "检测方式",
+      desc: "幻觉检测的核心路线走哪条？（环境内目前没有任何 LLM API key）",
+      options: [
+        { text: "路线 C · 混合（规则引擎 + LLM 可选）", desc: "规则引擎出候选与证据 → LLM 复核消歧；未配置 key 时自动降级为规则结果，即任务允许的 mock 模式", rec: true },
+        { text: "路线 A · 纯规则 / 启发式", desc: "数字规格比对、能力动词检测、无依据实体检测、遗漏检测；零成本、可复现、可解释，但召回受限" },
+        { text: "路线 B · 纯 LLM-as-judge", desc: "把知识库 + 回复交给 LLM 判定；对半对半错与遗漏更好，但需要 key、有成本与结果波动" }
+      ],
+      noteHint: "例如：希望规则引擎的每条判定都附「证据片段」便于人工复核……"
+    },
+    {
+      id: "Q3",
+      title: "LLM 接入",
+      desc: "是否给检测工具接入真实 LLM（涉及 key）？",
+      options: [
+        { text: "先不提供（默认离线可跑）", desc: "用规则引擎 + mock 模式出完整结果，README 里说明如何切换到真实 LLM", rec: true },
+        { text: "我提供 LLM 接入信息", desc: "请在下方「我的补充」里填写 base_url / api_key / model 名称", requiresNote: true },
+        { text: "我自己后续本地配置（先留好接口）", desc: "代码预留 LLMAdapter 与环境变量读取，我拿到 key 自己填" }
+      ],
+      noteHint: "若选「我提供」：base_url=… ；model=… ；key=…（注意：填入后这份文本会被复制回传给 AI）"
+    },
+    {
+      id: "Q4",
+      title: "分类粒度",
+      desc: "幻觉分类体系用多细的粒度？",
+      options: [
+        { text: "8 类细粒度", desc: "能力越界 / 安全误导 / 优惠编造 / 政策编造 / 政策偏差 / 参数编造 / 信息编造 / 信息遗漏（+ 正常负类）", rec: true },
+        { text: "5 类粗粒度", desc: "能力越界 / 政策与优惠 / 参数与信息 / 安全与合规 / 信息遗漏" },
+        { text: "我自定义分类", desc: "请在补充里写出你想要的类别", requiresNote: true }
+      ],
+      noteHint: "例如：想拆出「话术夸大」单独一类 / 想把「政策编造」与「政策偏差」合并……"
+    },
+    {
+      id: "Q5",
+      title: "严重程度分级",
+      desc: "是否需要给出每类的严重程度？用什么口径？",
+      options: [
+        { text: "P0 / P1 / P2 三级", desc: "P0 = 涉及资金/健康/合规或用户会据此行动；P1 = 误导购买决策、引发售后纠纷；P2 = 建议质量下降", rec: true },
+        { text: "1–5 分连续制", desc: "更细的严重度打分，便于排序与统计分布" },
+        { text: "不需要严重度", desc: "只判「是否幻觉 + 类型」" }
+      ],
+      noteHint: "例如：希望严重度直接对应「是否必须转人工」……"
+    },
+    {
+      id: "Q6",
+      title: "结果呈现形式",
+      desc: "检测结果与报告用什么形式交付？",
+      options: [
+        { text: "Markdown 报告 + 控制台表格 + JSON 结果", desc: "三种产物：人看的报告、终端截图用的表格、程序可读的结构化结果", rec: true },
+        { text: "上述 + Web Dashboard / HTML 可视化页面", desc: "额外做一个含指标图表的静态页面，截图更直观，但工作量更大" },
+        { text: "只要控制台输出 + JSON", desc: "最轻量" }
+      ],
+      noteHint: "例如：希望报告里带混淆矩阵表格 / 想要一张各类型分布的柱状图……"
+    },
+    {
+      id: "Q7",
+      title: "争议样本口径",
+      desc: "h04（发票半对半错）与 h20（信息遗漏）边界模糊，评估口径怎么定？",
+      options: [
+        { text: "单列「争议 case」，同时给宽松 / 严格两套指标", desc: "两套数字都报，并说明差异来源，最适合应对主观评分", rec: true },
+        { text: "只给一套严格口径指标", desc: "h04、h20 计入正样本必须检出，争议点用文字说明" },
+        { text: "只给一套宽松口径指标", desc: "h20 这类「遗漏」不计入必须检出项" }
+      ],
+      noteHint: "例如：你认为 h20 是否应该算幻觉？我的判断依据是……"
+    },
+    {
+      id: "Q8",
+      title: "单元测试",
+      desc: "是否附自动化测试？",
+      options: [
+        { text: "加冒烟测试（pytest / 对应语言测试）", desc: "保证可复现、防止回归，README 里可写「一条命令跑通」", rec: true },
+        { text: "不加测试，直接给运行结果", desc: "更快，但可复现性弱" }
+      ],
+      noteHint: "例如：只要一条能跑通的脚本，不需要测试框架……"
+    },
+    {
+      id: "Q9",
+      title: "交付与版本管理",
+      desc: "是否初始化 git 仓库、准备 GitHub 提交？",
+      options: [
+        { text: "git init 并准备 GitHub 提交", desc: "交付物允许直接给仓库链接，无需额外提交代码", rec: true },
+        { text: "只留本地文件，不走 git", desc: "提交时我自行打包" }
+      ],
+      noteHint: "例如：仓库名希望叫 xxx / 不要提交 doc 下的原始附件……"
+    },
+    {
+      id: "Q10",
+      title: "报告语言",
+      desc: "README 与评估报告用什么语言？",
+      options: [
+        { text: "中文", desc: "与业务方沟通一致", rec: true },
+        { text: "中英双语", desc: "关键章节中英对照，篇幅翻倍" }
+      ],
+      noteHint: "例如：README 中文、代码注释英文……"
+    },
+    {
+      id: "Q11",
+      title: "数据口径确认",
+      desc: "附件的两个理解点是否正确？",
+      options: [
+        { text: "按此理解执行", desc: "① 直接引用 doc/ 下原始附件、不拷贝副本；② 以 is_hallucination 作正 / 负类标签，hallucination_type 作辅助口径", rec: true },
+        { text: "我需要纠正（写在补充里）", desc: "请说明正确理解", requiresNote: true }
+      ],
+      noteHint: "例如：附件需要拷到 data/ 目录 / ground_truth 里的字段含义是……"
+    }
+  ];
+
+  var LS_KEY = "xduoai_0110_checklist_v1";
+  var state = { answers: {}, globalNote: "" };
+  var lastText = "";
+
+  var $ = function(id){ return document.getElementById(id); };
+  var container = $("questions");
+  var resultEl = $("result");
+  var hintEl = $("hint");
+
+  /* ---------- 持久化 ---------- */
+  function load(){
+    try{
+      var raw = localStorage.getItem(LS_KEY);
+      if(!raw) return;
+      var s = JSON.parse(raw) || {};
+      state.answers = s.answers || {};
+      state.globalNote = s.globalNote || "";
+    }catch(e){ /* 隐私模式等场景忽略 */ }
+  }
+  function save(){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+  }
+
+  /* ---------- 渲染 ---------- */
+  function esc(s){
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function render(){
+    var html = "";
+    QUESTIONS.forEach(function(q){
+      var cur = state.answers[q.id] || {};
+      html += '<section class="q" id="q-' + q.id + '" data-qid="' + q.id + '">';
+      html += '<div class="qhead"><span class="qno">' + q.id + '</span><h2>' + esc(q.title) + '</h2></div>';
+      html += '<p class="qdesc">' + esc(q.desc) + '</p><div class="opts">';
+      q.options.forEach(function(o, i){
+        var sel = cur.value === o.text;
+        var cls = "opt" + (o.rec ? " rec" : "") + (sel ? " sel" : "");
+        html += '<label class="' + cls + '">';
+        html += '<input type="radio" name="' + q.id + '" value="' + esc(o.text) + '"' + (sel ? " checked" : "") + '>';
+        html += '<span class="opt-body"><span class="opt-text">' + esc(o.text);
+        if(o.rec) html += '<span class="badge">★ 推荐</span>';
+        if(o.requiresNote) html += '<span class="badge must">需填补充</span>';
+        html += '</span>';
+        if(o.desc) html += '<span class="opt-desc">' + esc(o.desc) + '</span>';
+        html += '</span></label>';
+      });
+      html += '</div>';
+      html += '<label class="note"><span>我的补充：' + esc(q.noteHint || "可选，写下你的想法：") + '</span>';
+      html += '<textarea rows="2" data-qid="' + q.id + '" placeholder="在这儿补充……">' + esc(cur.note || "") + '</textarea></label>';
+      html += '</section>';
+    });
+    container.innerHTML = html;
+    $("globalNote").value = state.globalNote;
+    refresh();
+  }
+
+  /* ---------- 状态刷新 ---------- */
+  function selectedOption(q){
+    var cur = state.answers[q.id];
+    if(!cur || !cur.value) return null;
+    for(var i=0;i<q.options.length;i++){
+      if(q.options[i].text === cur.value) return q.options[i];
+    }
+    return { text: cur.value };
+  }
+
+  // 该题是否已确认：选了选项，且（若该选项要求补充）补充非空
+  function isDone(q){
+    var a = state.answers[q.id];
+    if(!a || !a.value) return false;
+    var opt = selectedOption(q);
+    if(opt && opt.requiresNote && !(a.note || "").trim()) return false;
+    return true;
+  }
+
+  function refresh(){
+    var done = 0, missing = [];
+    QUESTIONS.forEach(function(q){
+      var ok = isDone(q);
+      if(ok) done++; else missing.push(q.id);
+      var sec = $("q-" + q.id);
+      if(sec) sec.className = "q" + (ok ? "" : " incomplete");
+      // 同步单选高亮
+      var labels = sec ? sec.querySelectorAll("label.opt") : [];
+      for(var i=0;i<labels.length;i++){
+        var input = labels[i].querySelector("input");
+        var sel = input && input.checked;
+        var isRec = labels[i].className.indexOf("rec") >= 0;
+        labels[i].className = "opt" + (isRec ? " rec" : "") + (sel ? " sel" : "");
+      }
+    });
+    var p = $("progress");
+    p.innerHTML = "已完成 <b>" + done + "</b> / " + QUESTIONS.length;
+    p.className = "progress" + (done === QUESTIONS.length ? " done" : "");
+    return { done: done, missing: missing };
+  }
+
+  /* ---------- 结论文本 ---------- */
+  function pad(n){ return n < 10 ? "0" + n : "" + n; }
+  function nowText(){
+    var d = new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + " " +
+           pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function buildText(){
+    var st = refresh();
+    var L = [];
+    L.push("# 0110 · 客服回复幻觉检测 — 待确认清单结论");
+    L.push("生成时间：" + nowText() + "　确认进度：" + st.done + "/" + QUESTIONS.length);
+    L.push("");
+    L.push("> 说明：✅ 表示与推荐项一致，⚠️ 表示偏离推荐项（请重点看补充说明）。");
+    L.push("");
+    QUESTIONS.forEach(function(q){
+      var a = state.answers[q.id] || {};
+      var opt = selectedOption(q);
+      var head = q.id + " " + q.title + "：" + (a.value ? a.value : "（未选择）");
+      if(a.value){
+        if(opt && opt.rec) head += "　✅与推荐一致";
+        else head += "　⚠️非推荐项";
+      }
+      L.push(head);
+      var note = (a.note || "").trim();
+      L.push("    我的补充：" + (note ? note.replace(/\n/g, " ") : "无"));
+    });
+    L.push("");
+    L.push("【其他补充 / 全局说明】");
+    L.push((state.globalNote || "").trim() || "无");
+    L.push("");
+    L.push("（以上为待确认清单结论，请据此继续完善 0110 实施方案。）");
+    return L.join("\n");
+  }
+
+  function showHint(msg, cls){
+    hintEl.textContent = msg || "";
+    hintEl.className = "hint" + (cls ? " " + cls : "");
+  }
+
+  function generate(){
+    var st = refresh();
+    if(st.missing.length){
+      var go = window.confirm("以下问题还未确认：" + st.missing.join("、") +
+        "\n（未选择选项，或所选选项要求填写「我的补充」但为空）\n\n仍要生成结论吗？");
+      if(!go){ showHint("还没填完，已取消生成。", "err"); return false; }
+    }
+    lastText = buildText();
+    resultEl.textContent = lastText;
+    showHint("结论已生成，点「复制结论」即可回传给 AI。", "ok");
+    if(typeof resultEl.scrollIntoView === "function"){
+      resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    return true;
+  }
+
+  function copy(){
+    if(!lastText) lastText = resultEl.textContent || "";
+    if(!lastText.trim()){ showHint("还没有结论，请先点「一键生成结论」。", "err"); return; }
+    var ok = false;
+    var ta = document.createElement("textarea");
+    ta.value = lastText;
+    ta.setAttribute("readonly", "readonly");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    try{ ok = document.execCommand("copy"); }catch(e){ ok = false; }
+    document.body.removeChild(ta);
+
+    if(ok){
+      showHint("已复制到剪贴板，直接粘贴给 AI 即可。", "ok");
+    }else if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(lastText).then(function(){
+        showHint("已复制到剪贴板，直接粘贴给 AI 即可。", "ok");
+      }).catch(function(){
+        showHint("自动复制被浏览器拦截，请手动全选下方结论内容复制。", "err");
+      });
+    }else{
+      showHint("自动复制被拦截，请手动全选下方结论内容复制。", "err");
+    }
+  }
+
+  /* ---------- 事件 ---------- */
+  container.addEventListener("change", function(e){
+    var t = e.target;
+    if(!t || t.type !== "radio") return;
+    var qid = t.name;
+    var note = container.querySelector('textarea[data-qid="' + qid + '"]');
+    state.answers[qid] = { value: t.value, note: note ? note.value : "" };
+    save(); refresh();
+  });
+
+  container.addEventListener("input", function(e){
+    var t = e.target;
+    if(!t || t.tagName !== "TEXTAREA") return;
+    var qid = t.getAttribute("data-qid");
+    if(!state.answers[qid]) state.answers[qid] = { value: "", note: "" };
+    state.answers[qid].note = t.value;
+    save(); refresh();
+  });
+
+  $("globalNote").addEventListener("input", function(e){
+    state.globalNote = e.target.value; save();
+  });
+
+  $("btnAll").addEventListener("click", function(){
+    QUESTIONS.forEach(function(q){
+      var rec = null, i;
+      for(i=0;i<q.options.length;i++){ if(q.options[i].rec) rec = q.options[i]; }
+      if(!rec) return;
+      var prev = state.answers[q.id] || {};
+      state.answers[q.id] = { value: rec.text, note: prev.note || "" };
+    });
+    save(); render();
+    showHint("已全部采用推荐项，可逐题微调后生成结论。", "ok");
+  });
+
+  $("btnReset").addEventListener("click", function(){
+    if(!window.confirm("清空所有选择与补充内容？此操作不可撤销。")) return;
+    state.answers = {}; state.globalNote = ""; lastText = "";
+    save(); render(); resultEl.textContent = ""; showHint("已清空，请重新填写。", "ok");
+  });
+
+  $("btnGen").addEventListener("click", generate);
+  $("btnGen2").addEventListener("click", generate);
+  $("btnCopy").addEventListener("click", copy);
+  $("btnCopy2").addEventListener("click", copy);
+
+  /* ---------- 启动 ---------- */
+  load();
+  render();
+  if(Object.keys(state.answers).length) showHint("已恢复上次填写内容。", "ok");
+})();
+</script>
+</body>
+</html>
